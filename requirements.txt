@@ -1,0 +1,11 @@
+certifi==2024.7.4
+clickhouse-connect==0.8.18
+lz4==4.3.3
+numpy==1.26.4
+pandas==2.2.2
+pytz==2024.1
+six==1.16.0
+tqdm==4.66.4
+tzdata==2024.1
+websocket-client==1.8.0
+zstandard==0.22.0
