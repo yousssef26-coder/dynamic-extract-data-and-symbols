@@ -4,7 +4,6 @@ import json
 from datetime import datetime
 import websocket
 import clickhouse_connect
-import traceback
 
 print("🔌 محاولة الاتصال بقاعدة البيانات ClickHouse...")
 try:
@@ -20,8 +19,9 @@ try:
     print("✅ تم الاتصال بقاعدة البيانات بنجاح.")
 except Exception as e:
     print("❌ فشل الاتصال بقاعدة البيانات:")
-    traceback.print_exc()
+    print(f"  - Exception: {repr(e)}")
     exit()
+
 
 def create_tables_if_not_exist(symbol):
     symbol_lower = symbol.lower()
@@ -59,20 +59,19 @@ def create_tables_if_not_exist(symbol):
     """
 
     try:
-        print(f"🧩 إنشاء جدول التداول: {trade_table_name}")
+        print(f"Checking/Creating table: {trade_table_name}")
         client.command(trade_table_query)
-        print(f"✅ جدول {trade_table_name} جاهز")
-
-        print(f"🧩 إنشاء جدول الشموع: {kline_table_name}")
+        print(f"Table '{trade_table_name}' is ready.")
+        print(f"Checking/Creating table: {kline_table_name}")
         client.command(kline_table_query)
-        print(f"✅ جدول {kline_table_name} جاهز")
+        print(f"Table '{kline_table_name}' is ready.")
     except Exception as e:
-        print(f"❌ خطأ أثناء إنشاء الجداول لـ {symbol}")
-        traceback.print_exc()
+        print(f"[FATAL ERROR] Could not create tables for {symbol}: {e}")
         exit()
 
+
 def get_target_symbol():
-    print("🔍 البحث عن عملة مناسبة...")
+    print("🔍 جاري البحث عن عملة ذات تصنيف عالي (hot) متاحة...")
     hot_query = """
         SELECT symbol
         FROM symbols
@@ -80,47 +79,34 @@ def get_target_symbol():
         ORDER BY hot_rank ASC
         LIMIT 1
     """
-    try:
-        result = client.query(hot_query).result_rows
-        if result:
-            symbol = result[0][0]
-            print(f"🔥 تم اختيار العملة: {symbol}")
-            return symbol
-    except Exception as e:
-        print("❌ فشل في جلب العملات")
-        traceback.print_exc()
+    result = client.query(hot_query).result_rows
+    if result:
+        symbol = result[0][0]
+        print(f"✅ تم العثور على عملة ذات تصنيف عالي: {symbol}")
+        return symbol
 
-    print("🟡 لا توجد عملة hot، نحاول اختيار أي عملة...")
+    print("⚠️ لم يتم العثور على عملة ذات تصنيف عالي متاحة. جاري البحث عن أي عملة بديلة...")
     fallback_query = """
         SELECT symbol
         FROM symbols
         WHERE guest_status = 0
         LIMIT 1
     """
-    try:
-        result = client.query(fallback_query).result_rows
-        if result:
-            symbol = result[0][0]
-            print(f"✅ تم اختيار عملة بديلة: {symbol}")
-            return symbol
-    except Exception as e:
-        print("❌ فشل في جلب العملات الاحتياطية")
-        traceback.print_exc()
+    fallback_result = client.query(fallback_query).result_rows
+    if fallback_result:
+        symbol = fallback_result[0][0]
+        print(f"✅ تم العثور على عملة بديلة: {symbol}")
+        return symbol
 
     return None
 
+
 def mark_symbol_as_in_use(symbol):
     now = datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")
-    try:
-        client.command(f"""
-            ALTER TABLE symbols UPDATE guest_status = 1, guest_last_update = toDateTime('{now}')
-            WHERE symbol = '{symbol}'
-        """)
-        print(f"📌 تم حجز العملة: {symbol}")
-    except Exception as e:
-        print("❌ فشل في تحديث حالة العملة")
-        traceback.print_exc()
-
+    client.command(f"""
+        ALTER TABLE symbols UPDATE guest_status = 1, guest_last_update = toDateTime('{now}')
+        WHERE symbol = '{symbol}'
+    """)
     def update_loop():
         while True:
             time.sleep(60)
@@ -134,6 +120,7 @@ def mark_symbol_as_in_use(symbol):
                 print(f"[ERROR] Heartbeat update failed for {symbol}: {e}")
     threading.Thread(target=update_loop, daemon=True).start()
 
+
 def insert_trade_data(symbol, payload):
     table_name = f"{symbol.lower()}_trade"
     column_names = ['symbol', 'timestamp', 'price', 'qty', 'side']
@@ -146,12 +133,15 @@ def insert_trade_data(symbol, payload):
             float(payload["q"]),
             int(payload["m"])
         ]
-        client.insert(table_name, [data_row], column_names=column_names)
+        print("📩 رسالة جديدة من Binance")
         print(f"💾 صفقة جديدة لـ {symbol}: {data_row}")
+        client.insert(table_name, [data_row], column_names=column_names)
+
     except Exception as e:
         print(f"[ERROR in insert_trade_data]")
-        traceback.print_exc()
-        print(f"Payload: {payload}")
+        print(f"  - Exception: {repr(e)}")
+        print(f"  - Payload: {payload}")
+
 
 def insert_kline_data(symbol, payload):
     table_name = f"{symbol.lower()}_kline_1m"
@@ -175,25 +165,27 @@ def insert_kline_data(symbol, payload):
             int(k["n"]),
             int(k["x"])
         ]
+        print("📩 شمعة جديدة من Binance")
+        print(f"💾 شمعة لـ {symbol}: {data_row}")
         client.insert(table_name, [data_row], column_names=column_names)
-        print(f"🕯️ شمعة جديدة لـ {symbol}: {data_row}")
+
     except Exception as e:
         print(f"[ERROR in insert_kline_data]")
-        traceback.print_exc()
-        print(f"Payload: {payload}")
+        print(f"  - Exception: {repr(e)}")
+        print(f"  - Payload: {payload}")
+
 
 stream_handlers = {
     "trade": insert_trade_data,
     "kline": insert_kline_data,
 }
 
+
 def stream_handler(symbol, streams):
     stream_path = '/'.join([f"{symbol.lower()}@{s}" for s in streams])
     ws_url = f"wss://stream.binance.com:9443/stream?streams={stream_path}"
-    print(f"🌐 بدء الاتصال بـ WebSocket: {ws_url}")
 
     def on_message(ws, message):
-        print("📩 رسالة جديدة من Binance")
         try:
             data = json.loads(message)
             stream_type = data['stream'].split('@')[1]
@@ -201,43 +193,37 @@ def stream_handler(symbol, streams):
             handler = stream_handlers.get(stream_key)
             if handler:
                 handler(symbol, data['data'])
-            else:
-                print(f"⚠️ لا يوجد معالج للنوع: {stream_key}")
         except Exception as e:
             print(f"[ERROR] on_message: {e}")
-            traceback.print_exc()
 
     def on_error(ws, error):
-        print("❌ WebSocket error:", error)
+        print("WebSocket error:", error)
 
-    def on_close(ws, code, msg):
-        print("🔌 WebSocket closed:", code, msg)
+    def on_close(ws, close_status_code, close_msg):
+        print(f"🔌 WebSocket closed: {close_status_code} {close_msg}")
 
     def on_open(ws):
-        print(f"✅ WebSocket مفتوح للرمز: {symbol}")
+        print(f"✅ WebSocket opened for {symbol} | streams: {streams}")
 
-    try:
-        ws = websocket.WebSocketApp(ws_url,
-                                    on_message=on_message,
-                                    on_error=on_error,
-                                    on_close=on_close,
-                                    on_open=on_open)
-        ws.run_forever()
-    except Exception as e:
-        print("❌ خطأ أثناء تشغيل WebSocket:")
-        traceback.print_exc()
+    ws = websocket.WebSocketApp(ws_url,
+                                 on_message=on_message,
+                                 on_error=on_error,
+                                 on_close=on_close,
+                                 on_open=on_open)
 
-# ====== Main =======
+    # ✅ المهم هنا: ping_interval و ping_timeout
+    ws.run_forever(ping_interval=20, ping_timeout=10)
+
+
 if __name__ == "__main__":
-    print("🚀 بدء البرنامج...")
     symbol = get_target_symbol()
     if not symbol:
-        print("❌ لا توجد عملة مناسبة للتعامل معها.")
+        print("❌ مفيش عملة متاحة حالياً.")
         exit()
 
     create_tables_if_not_exist(symbol)
+    print(f"✅ تم اختيار العملة النهائية: {symbol} وجداولها جاهزة.")
     mark_symbol_as_in_use(symbol)
 
-    print(f"✅ العملة النهائية المختارة: {symbol}")
     streams = ["trade", "kline_1m"]
     stream_handler(symbol, streams)
