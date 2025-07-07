@@ -1,18 +1,23 @@
-# fly.toml (النسخة الصحيحة والمعدّلة للعامل)
+# fly.toml app configuration file generated for dynamic-extract-data-and-symbols-p0hfiq on 2025-07-07T11:08:25Z
+#
+# See https://fly.io/docs/reference/configuration/ for information about how to use this file.
+#
 
-# سيتم استبدال اسم التطبيق تلقائياً بواسطة سكربت المنسق
-app = "worker-placeholder"
-primary_region = "sin"
+app = 'dynamic-extract-data-and-symbols-p0hfiq'
+primary_region = 'cdg'
 
-# هذا هو القسم الأهم.
-# نحن نحدد هنا الأمر الذي سيتم تشغيله عند بدء تشغيل الآلة.
-[processes]
-  # اسم العملية هو "app"، والأمر هو تشغيل ملف البايثون الخاص بنا.
-  # علامات الاقتباس المفردة ضرورية لأن اسم الملف يحتوي على مسافات.
-  app = "python 'main.py'"
+[build]
 
-# تحديد حجم ومواصفات الآلة الافتراضية
+[http_service]
+  internal_port = 8080
+  force_https = true
+  auto_stop_machines = 'stop'
+  auto_start_machines = true
+  min_machines_running = 0
+  processes = ['app']
+
 [[vm]]
-  cpu_kind = "shared"
+  memory = '1gb'
+  cpu_kind = 'shared'
   cpus = 1
-  memory = "1gb"
+  memory_mb = 1024
